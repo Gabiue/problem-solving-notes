@@ -1,0 +1,18 @@
+# Assistant / personal notes (not part of the solutions)
+context.md
+instrucoes.md
+CLAUDE.md
+.claude/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# .NET build output
+bin/
+obj/
+
+# OS
+.DS_Store
+Thumbs.db
