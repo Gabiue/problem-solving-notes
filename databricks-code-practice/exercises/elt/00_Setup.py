@@ -1,5 +1,8 @@
 # Databricks notebook source
-# COMMAND ----------
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # MAGIC %md
 # MAGIC # 00_Setup: Shared Data Generator
 # MAGIC **Run this notebook once** before solving any exercise. It creates the `db_code` catalog,
