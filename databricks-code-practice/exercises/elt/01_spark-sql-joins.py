@@ -165,6 +165,13 @@ print("Exercise 1 passed!")
 
 # Your code here
 
+spark.sql(f"""
+        CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.joins_ex2_output AS
+        SELECT o.order_id, o.customer_id, o.amount, o.status, o.order_date, COALESCE(c.name, 'Unknown') as name, c.region
+        FROM {CATALOG}.elt.orders AS o
+        LEFT JOIN {CATALOG}.elt.customers as c
+        ON o.customer_id = c.customer_id;""")
+
 
 # COMMAND ----------
 
@@ -211,7 +218,12 @@ print("Exercise 2 passed!")
 
 # EXERCISE_KEY: spark_sql_joins_ex3
 # TODO: Anti-join to find orphan line items, write to Delta
-
+spark.sql(f"""CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.joins_ex3_output AS
+          SELECT *
+          FROM {CATALOG}.elt.order_items as oc
+          LEFT ANTI JOIN {CATALOG}.elt.orders as o
+          on oc.order_id = o.order_id
+          """)
 # Your code here
 
 
@@ -265,7 +277,13 @@ print("Exercise 3 passed!")
 
 # EXERCISE_KEY: spark_sql_joins_ex4
 # TODO: Semi-join customers against orders, write to Delta
-
+spark.sql(f"""
+          CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.joins_ex4_output AS
+          SELECT *
+          FROM {CATALOG}.elt.customers as c
+          SEMI JOIN {CATALOG}.elt.orders as o
+          on c.customer_id = o.customer_id
+          """)
 # Your code here
 
 
@@ -322,7 +340,19 @@ print("Exercise 4 passed!")
 
 # EXERCISE_KEY: spark_sql_joins_ex5
 # TODO: Self-join orders to find same-day pairs, write to Delta
-
+spark.sql(f"""
+          CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.joins_ex5_output AS
+          SELECT o1.customer_id, o1.order_date, o1.order_id AS order_id_1,
+            o2.order_id AS order_id_2,
+            o1.amount AS amount_1,
+            o2.amount AS amount_2
+            FROM {CATALOG}.elt.orders as o1
+            JOIN {CATALOG}.elt.orders as o2
+            ON o1.customer_id = o2.customer_id 
+            AND o1.order_id < o2.order_id 
+            AND o1.order_date = o2.order_date
+            WHERE o1.customer_id is NOT NULL
+          """)
 # Your code here
 
 
@@ -388,6 +418,19 @@ print("Exercise 5 passed!")
 
 # Your code here
 
+spark.sql(f"""
+          CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.joins_ex6_output AS
+          SELECT o.order_id, c.name as customer_name, c.region, oi.quantity, oi.unit_price, p.name as product_name, p.category, o.status
+          FROM {CATALOG}.elt.orders as o
+          INNER JOIN {CATALOG}.elt.customers as c
+          ON o.customer_id = c.customer_id
+          INNER JOIN {CATALOG}.elt.order_items as oi
+          ON o.order_id = oi.order_id
+          INNER JOIN {CATALOG}.elt.products as p
+          ON oi.product_id = p.product_id
+          QUALIFY ROW_NUMBER() OVER(PARTITION BY o.order_id ORDER BY oi.quantity DESC) =1
+        
+          """)
 
 # COMMAND ----------
 
@@ -442,7 +485,15 @@ print("Exercise 6 passed!")
 
 # EXERCISE_KEY: spark_sql_joins_ex7
 # TODO: GROUP BY with HAVING for high-value customers, write to Delta
-
+spark.sql(f"""
+          CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.joins_ex7_output AS
+          SELECT o.customer_id, COUNT(*) as order_count, SUM(o.amount) as total_spent, AVG(o.amount) as avg_order_value, c.name as name, c.region as region
+          FROM {CATALOG}.elt.orders as o
+          INNER JOIN {CATALOG}.elt.customers as c
+          ON o.customer_id = c.customer_id
+          GROUP BY o.customer_id, name, region HAVING total_spent > 500
+    
+          """)
 # Your code here
 
 
@@ -509,7 +560,16 @@ print("Exercise 7 passed!")
 
 # EXERCISE_KEY: spark_sql_joins_ex8
 # TODO: Build ROLLUP aggregation table, write to Delta
-
+spark.sql(f"""
+          CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.joins_ex8_rollup AS
+          SELECT c.region, c.tier, COUNT(*) as order_count, SUM(o.amount) as total_revenue, AVG(o.amount) as avg_order_value
+          FROM {CATALOG}.elt.orders as o
+          INNER JOIN {CATALOG}.elt.customers as c
+          ON o.customer_id = c.customer_id
+          WHERE o.status = 'completed'
+          GROUP BY ROLLUP(c.region, c.tier)
+          HAVING SUM(o.amount) > 0
+          """)
 # Your code here
 
 
@@ -575,7 +635,14 @@ print("Exercise 8 passed!")
 
 # EXERCISE_KEY: spark_sql_joins_ex9
 # TODO: Build CUBE aggregation table, write to Delta
-
+spark.sql(f"""
+          CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.joins_ex9_cube AS
+          SELECT c.region, o.status, COUNT(*) as order_count, SUM(o.amount) as total_revenue, AVG(o.amount) as avg_order_value
+          FROM {CATALOG}.elt.orders as o
+          INNER JOIN {CATALOG}.elt.customers as c
+          ON o.customer_id = c.customer_id
+          GROUP BY CUBE (c.region, o.status)
+          """)
 # Your code here
 
 
