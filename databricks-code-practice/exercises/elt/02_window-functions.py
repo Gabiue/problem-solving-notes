@@ -1,5 +1,8 @@
 # Databricks notebook source
-# COMMAND ----------
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # MAGIC %md
 # MAGIC # Window Functions
 # MAGIC **Topic**: ELT | **Exercises**: 8 | **Total Time**: ~80 min
@@ -29,6 +32,7 @@
 # MAGIC %run ./setup/window-functions-setup
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC **Setup complete.** Exercise tables are in `db_code.window_functions`.
 # MAGIC Each exercise reads from its own source table and writes results to a separate output table.
@@ -42,6 +46,7 @@
 # MAGIC - Ex 8 (hard): `window_ex8_events` - 15 clickstream events across 2 users
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Exercise 1: ROW_NUMBER Dedup - Keep Latest Order per Customer
 # MAGIC **Difficulty**: Easy | **Time**: ~5 min
@@ -70,7 +75,13 @@
 
 # EXERCISE_KEY: window_ex1
 # TODO: Deduplicate orders keeping latest per customer using ROW_NUMBER + QUALIFY
-
+spark.sql(f"""
+          CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.window_ex1_deduped AS
+          SELECT * 
+          FROM {CATALOG}.{SCHEMA}.window_ex1_orders as o
+          WHERE customer_id IS NOT NULL
+          QUALIFY ROW_NUMBER()OVER(PARTITION BY customer_id ORDER BY updated_at DESC) = 1
+          """)
 # Your code here
 
 
@@ -94,6 +105,7 @@ assert "row_number" not in [c.lower() for c in result.columns] and "rn" not in [
 print("Exercise 1 passed!")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Exercise 2: RANK vs DENSE_RANK - Rank Customers by Order Count
 # MAGIC **Difficulty**: Easy | **Time**: ~5 min
@@ -125,7 +137,15 @@ print("Exercise 1 passed!")
 
 # EXERCISE_KEY: window_ex2
 # TODO: Rank customers by order count showing RANK vs DENSE_RANK difference
-
+spark.sql(f"""
+          CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.window_ex2_ranked AS
+          SELECT customer_id,
+          COUNT(*) as order_count,
+          RANK() OVER(ORDER BY COUNT(*) DESC) AS rank_val,
+          DENSE_RANK() OVER(ORDER BY COUNT(*) DESC) as dense_rank_val
+          FROM {CATALOG}.{SCHEMA}.window_ex2_orders 
+          GROUP BY customer_id
+          """)
 # Your code here
 
 
@@ -159,6 +179,7 @@ assert c6.dense_rank_val == 4, f"CUST-006 dense_rank_val should be 4, got {c6.de
 print("Exercise 2 passed!")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Exercise 3: LAG for Period-Over-Period - Order Amount Change
 # MAGIC **Difficulty**: Medium | **Time**: ~10 min
@@ -186,7 +207,13 @@ print("Exercise 2 passed!")
 
 # EXERCISE_KEY: window_ex3
 # TODO: Calculate order-over-order amount change per customer using LAG
-
+spark.sql(f"""
+          CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.window_ex3_changes AS
+          SELECT order_id, customer_id, amount, order_date,
+          LAG(amount) OVER(PARTITION BY customer_id ORDER BY order_date) as prev_amount,
+          amount - LAG(amount) OVER(PARTITION BY customer_id ORDER BY order_date) as amount_change
+          FROM {CATALOG}.{SCHEMA}.window_ex3_orders
+          """)
 # Your code here
 
 
@@ -215,6 +242,7 @@ assert cust1_last.amount_change == 80.00, f"ORD-304 amount_change should be 80.0
 print("Exercise 3 passed!")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Exercise 4: Running Totals with Explicit ROWS BETWEEN Frame
 # MAGIC **Difficulty**: Medium | **Time**: ~10 min
@@ -242,7 +270,13 @@ print("Exercise 3 passed!")
 
 # EXERCISE_KEY: window_ex4
 # TODO: Calculate cumulative order amount per customer with explicit frame specification
-
+spark.sql(f"""
+          CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.window_ex4_running_totals AS
+          SELECT order_id, customer_id, amount, order_date,
+          SUM(amount) OVER(PARTITION BY customer_id ORDER BY order_date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) 
+          AS running_total
+          FROM {CATALOG}.{SCHEMA}.window_ex4_orders
+          """)
 # Your code here
 
 
@@ -273,6 +307,7 @@ assert cust3_mid == 375.00, f"CUST-003 second running_total should be 375.00, go
 print("Exercise 4 passed!")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Exercise 5: NTILE Quartile Bucketing by Total Spend
 # MAGIC **Difficulty**: Medium | **Time**: ~10 min
@@ -300,7 +335,12 @@ print("Exercise 4 passed!")
 
 # EXERCISE_KEY: window_ex5
 # TODO: Bucket customers into quartiles by total spend using NTILE
-
+spark.sql(f"""
+          CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.window_ex5_quartiles AS
+          SELECT customer_id, total_spend, 
+          NTILE(4) OVER(ORDER BY total_spend ASC) as spend_quartile
+          FROM {CATALOG}.{SCHEMA}.window_ex5_customer_spend
+          """)
 # Your code here
 
 
@@ -333,6 +373,7 @@ assert q1b == 1, f"CUST-006 (spend=150) should be quartile 1, got {q1b}"
 print("Exercise 5 passed!")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Exercise 6: FIRST_VALUE/LAST_VALUE - First and Most Recent Order
 # MAGIC **Difficulty**: Medium | **Time**: ~10 min
@@ -363,7 +404,15 @@ print("Exercise 5 passed!")
 
 # EXERCISE_KEY: window_ex6
 # TODO: Find first and most recent order per customer using FIRST_VALUE and LAST_VALUE
-
+spark.sql(f"""
+          CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.window_ex6_first_last AS
+          SELECT order_id, customer_id, amount, order_date,
+          FIRST_VALUE(order_id) OVER(PARTITION BY customer_id ORDER BY order_date ASC) as first_order_id,
+          FIRST_VALUE(amount) OVER(PARTITION BY customer_id ORDER BY order_date ASC) as first_order_amount,
+          LAST_VALUE(order_id) OVER(PARTITION BY customer_id ORDER BY order_date ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) as last_order_id,
+          LAST_VALUE(amount) OVER(PARTITION BY customer_id ORDER BY order_date ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) as last_order_amount
+          FROM {CATALOG}.{SCHEMA}.window_ex6_orders
+          """)
 # Your code here
 
 
@@ -397,6 +446,7 @@ assert c4.last_order_id == "ORD-615", f"CUST-004 last_order_id should be ORD-615
 print("Exercise 6 passed!")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Exercise 7: QUALIFY for Top-N Per Group Without Subquery
 # MAGIC **Difficulty**: Medium | **Time**: ~10 min
@@ -428,7 +478,13 @@ print("Exercise 6 passed!")
 
 # EXERCISE_KEY: window_ex7
 # TODO: Get top 2 highest-value orders per customer using QUALIFY
-
+spark.sql(f"""
+          CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.window_ex7_top2 AS
+          SELECT * 
+          FROM {CATALOG}.{SCHEMA}.window_ex7_orders
+          QUALIFY ROW_NUMBER() OVER(PARTITION BY customer_id ORDER BY amount DESC) <=2
+        
+          """)
 # Your code here
 
 
@@ -461,6 +517,7 @@ for cust in ["CUST-001", "CUST-002", "CUST-003"]:
 print("Exercise 7 passed!")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Exercise 8: Sessionization - Assign Session IDs Based on 30-Min Gaps
 # MAGIC **Difficulty**: Hard | **Time**: ~20 min
@@ -492,7 +549,21 @@ print("Exercise 7 passed!")
 
 # EXERCISE_KEY: window_ex8
 # TODO: Assign session IDs based on 30-minute inactivity gap
-
+spark.sql(f"""
+          CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.window_ex8_sessions AS
+          WITH flagged as (
+              SELECT *, 
+              CASE 
+              WHEN LAG(event_ts) OVER(PARTITION BY user_id ORDER BY event_ts) IS NULL THEN 1
+              WHEN event_ts > LAG(event_ts) OVER (PARTITION BY user_id ORDER BY event_ts) + INTERVAL 30 MINUTES THEN 1
+              ELSE 0
+              END AS is_new_session
+              FROM {CATALOG}.{SCHEMA}.window_ex8_events              
+          )
+          SELECT event_id, user_id, event_type, event_ts, payload,
+          SUM(is_new_session) OVER(PARTITION BY user_id ORDER BY event_ts ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as session_id
+          FROM flagged
+          """)
 # Your code here
 
 
