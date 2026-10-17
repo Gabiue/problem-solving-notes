@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # MAGIC %md
 # MAGIC # PySpark DataFrame Transformations
 # MAGIC Practice core PySpark DataFrame API operations: select, filter, withColumn, when/otherwise,
@@ -85,6 +89,15 @@
 
 # EXERCISE_KEY: pyspark_ex1
 # TODO: Filter to completed orders, add amount_with_tax column, write to Delta
+from pyspark.sql import functions as F
+orders = spark.table(f"{CATALOG}.{SCHEMA}.orders_ex1")
+result =(orders
+         .filter (F.col("status") == "completed")
+         .select('order_id', 'customer_id',F.col("amount"), 'order_date')
+         .withColumn('amount_with_tax', F.round(F.col("amount")*1.08 , 2) )
+)
+result.write.format("delta").mode("overwrite").saveAsTable(f"{CATALOG}.{SCHEMA}.completed_orders_ex1")
+
 # Your code here
 
 # COMMAND ----------
@@ -151,6 +164,21 @@ print("Exercise 1 passed!")
 
 # EXERCISE_KEY: pyspark_ex2
 # TODO: Rename columns to snake_case, cast signupDate to DateType, write to Delta
+from pyspark.sql import functions as F
+customers = spark.table(f"{CATALOG}.{SCHEMA}.customers_ex2")
+result = (customers
+    .select(
+        F.col("customerId").alias("customer_id"),
+        F.col("customerName").alias("customer_name"),
+        F.col("emailAddress").alias("email_address"),
+        F.col("CustomerRegion").alias("region"),
+        F.col("CustomerTier").alias("tier"),
+        F.to_date(F.col("signupDate")).alias("signup_date")
+    )
+
+)
+
+result.write.format("delta").mode("overwrite").saveAsTable(f"{CATALOG}.{SCHEMA}.customers_clean_ex2")
 # Your code here
 
 # COMMAND ----------
@@ -224,6 +252,29 @@ print("Exercise 2 passed!")
 
 # EXERCISE_KEY: pyspark_ex3
 # TODO: Add order_tier and priority_score columns using when/otherwise, write to Delta
+from pyspark.sql import functions as F
+orders = spark.table(f"{CATALOG}.{SCHEMA}.orders_ex3")
+result = (
+    orders
+    .withColumn("order_tier", 
+                F.when(F.col("status").isin("cancelled", "returned"),"inactive")
+                .when(F.col("amount") >= 200, "premium")
+                .when((F.col("amount")>= 50) & (F.col("amount") < 200), "standard")
+                .when((F.col("amount")> 0) & (F.col("amount") < 50), "budget")
+                .otherwise("free")
+
+  )
+    .withColumn("priority_score",
+        F.when(F.col("order_tier") == "premium", 4)
+        .when(F.col("order_tier") == "standard", 3)
+        .when(F.col("order_tier") == "budget", 2)
+        .when(F.col("order_tier") == 'free', 1)
+        .otherwise(0)
+    )        
+)
+result.write.format("delta").mode("overwrite").saveAsTable(f"{CATALOG}.{SCHEMA}.tiered_orders_ex3")
+
+
 # Your code here
 
 # COMMAND ----------
@@ -301,6 +352,17 @@ print("Exercise 3 passed!")
 
 # EXERCISE_KEY: pyspark_ex4
 # TODO: Pivot orders by status to get per-customer order counts, write to Delta
+from pyspark.sql import functions as F
+orders = spark.table(f"{CATALOG}.{SCHEMA}.orders_ex4")
+
+result = (orders
+          .groupBy('customer_id')
+          .pivot('status', ['completed', 'pending', 'cancelled', 'returned'])
+          .agg(F.count('order_id'))
+          .fillna(0)
+          )
+
+result.write.format("delta").mode("overwrite").saveAsTable(f"{CATALOG}.{SCHEMA}.customer_status_pivot_ex4")
 # Your code here
 
 # COMMAND ----------
@@ -376,6 +438,25 @@ print("Exercise 4 passed!")
 
 # EXERCISE_KEY: pyspark_ex5
 # TODO: Unpivot wide metrics to long format using stack(), filter zeros, write to Delta
+from pyspark.sql import functions as F
+
+metrics = spark.table(f"{CATALOG}.{SCHEMA}.customer_metrics_ex5")
+result = (metrics
+          .selectExpr(
+              "customer_id",
+              "name",
+              """
+              stack(3,
+              'completed_orders', completed_orders,
+              'pending_orders', pending_orders,
+              'cancelled_orders', cancelled_orders) as (metric_name, metric_value)
+              """
+          )
+          .filter(F.col('metric_value') > 0)
+          
+)
+
+result.write.format('delta').mode("overwrite").saveAsTable(f"{CATALOG}.{SCHEMA}.customer_metrics_long_ex5")
 # Your code here
 
 # COMMAND ----------
@@ -450,6 +531,36 @@ print("Exercise 5 passed!")
 # EXERCISE_KEY: pyspark_ex6
 # TODO: Create a UDF to classify payloads, apply it, write to Delta
 # Your code here
+
+from pyspark.sql import functions as F
+from pyspark.sql.functions import udf
+from pyspark.sql.types import StringType
+
+events = spark.table(f"{CATALOG}.{SCHEMA}.events_ex6")
+
+@udf(returnType=StringType())
+def classify(payload):
+    if not payload:
+        return "no_data"
+    if "price" in payload:
+        return "transaction"
+    if "duration" in payload:
+        return "engagement"
+    
+    return "other"
+
+result = (events
+          .withColumn("payload_class", classify("payload"))
+          .select("event_id","user_id", "event_type", "event_ts", "payload_class")
+)
+
+(result.write
+ .format('delta')
+ .mode("overwrite")
+ .saveAsTable(f"{CATALOG}.{SCHEMA}.classified_events_ex6")
+ )
+
+
 
 # COMMAND ----------
 
@@ -533,6 +644,23 @@ print("Exercise 6 passed!")
 # EXERCISE_KEY: pyspark_ex7
 # TODO: Rewrite payload classification using only native Spark functions, write to Delta
 # Your code here
+from pyspark.sql import functions as F
+
+events = spark.table(f"{CATALOG}.{SCHEMA}.events_ex7")
+
+result = (events
+          .withColumn("payload_class",
+                      F.when(F.col("payload").isNull() | (F.col("payload") == "") , "no_data")
+                      .when(F.col("payload").contains("price"), "transaction")
+                      .when(F.col("payload").contains("duration"), "engagement")
+                      .otherwise("other"))
+          .select("event_id","user_id", "event_type", "event_ts", "payload_class")
+          )
+
+(result.write
+ .format("delta")
+ .mode("overwrite")
+ .saveAsTable(f"{CATALOG}.{SCHEMA}.classified_events_native_ex7"))
 
 # COMMAND ----------
 
@@ -618,6 +746,38 @@ print("Exercise 7 passed!")
 # EXERCISE_KEY: pyspark_ex8
 # TODO: Multi-step pipeline - aggregate items, join, create struct, write with replaceWhere
 # Your code here
+
+from pyspark.sql import functions as F
+
+orders = spark.table(f"{CATALOG}.{SCHEMA}.orders_ex8")
+items = spark.table(f"{CATALOG}.{SCHEMA}.order_items_ex8")
+
+items_agg = (items
+             .groupBy( "order_id")
+             .agg(
+                 F.sum("quantity").alias("total_items"),
+                 F.sum(F.col("quantity") * F.col("unit_price")).alias("total_value")
+             ))
+result = (orders
+          .join(items_agg, on="order_id", how="left")
+          .withColumn("items_summary", F.struct(
+              F.coalesce(F.col("total_items"), F.lit(0)).cast("long").alias("total_items"),
+              F.coalesce(F.col("total_value"), F.lit(0.0)).cast("double").alias("total_value")
+          ))
+          .withColumn("amount_bucket",
+                      F.when(F.col("amount")>= 100, "high")
+                      .when(F.col("amount") >=25, "medium")
+                      .otherwise("low"))
+          .filter(F.col("status")== "completed")
+          .select("order_id", "customer_id", "customer_name", "region", "amount", "status", "amount_bucket", "items_summary", "order_date", "updated_at")
+          )
+
+(result.write
+ .format("delta")
+ .mode("overwrite")
+ .option("replaceWhere", "status = 'completed'" )
+ .saveAsTable(f"{CATALOG}.{SCHEMA}.enriched_orders_ex8"))    
+
 
 # COMMAND ----------
 
