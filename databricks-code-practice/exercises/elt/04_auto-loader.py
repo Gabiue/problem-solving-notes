@@ -1,5 +1,8 @@
 # Databricks notebook source
-# COMMAND ----------
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # MAGIC %md
 # MAGIC # Auto Loader Ingestion
 # MAGIC **Topic**: ELT | **Exercises**: 6 | **Total Time**: ~75 min
@@ -27,6 +30,7 @@
 # MAGIC %run ./setup/auto-loader-setup
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC **Setup complete.** Exercise files and tables are in `db_code.auto_loader`.
 # MAGIC
@@ -43,6 +47,7 @@
 # MAGIC **Pattern**: Each exercise reads from a source directory, writes to `db_code.auto_loader.exN_output` (except Ex 6 which MERGEs into `ex6_target`).
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Exercise 1: Basic cloudFiles Read
 # MAGIC **Difficulty**: Easy | **Time**: ~10 min
@@ -79,6 +84,19 @@
 
 # EXERCISE_KEY: auto_loader_ex1
 # TODO: Read JSON files with Auto Loader and write to Delta table
+(spark.readStream
+ .format("cloudFiles")
+ .option("cloudFiles.format", "json")    
+ .option("cloudFiles.schemaLocation", f"{CHECKPOINT_BASE}/ex1_schema")
+ .load(f"{VOLUME_BASE}/ex1_files/")
+ .writeStream
+ .format("delta")
+ .option("checkpointLocation", f"{CHECKPOINT_BASE}/ex1")
+ .trigger(availableNow=True)
+ .toTable(f"{CATALOG}.{SCHEMA}.ex1_output")
+ .awaitTermination()
+
+ )
 
 # Your code here
 
@@ -94,9 +112,10 @@ assert "amount" in result.columns, "Missing amount column"
 assert result.filter("order_id = 'ORD-201'").count() == 1, "ORD-201 should exist"
 assert result.filter("order_id = 'ORD-210'").count() == 1, "ORD-210 should exist"
 
-print("Exercise 1 passed!")
+print("Exercise 1 pcolumn must be Dassed!")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Exercise 2: Schema Hints for Type Control
 # MAGIC **Difficulty**: Medium | **Time**: ~10 min
@@ -123,8 +142,24 @@ print("Exercise 1 passed!")
 
 # EXERCISE_KEY: auto_loader_ex2
 # TODO: Read JSON with schema hints to force amount to DOUBLE
-
 # Your code here
+df = (spark.readStream
+ .format("cloudFiles")
+ .option("cloudFiles.format", "json")
+ .option("cloudFiles.schemaLocation", f"{CHECKPOINT_BASE}/ex2_schema/")
+ .option("cloudFiles.schemaHints", "amount DOUBLE")
+ .load(f"{VOLUME_BASE}/ex2_files/")
+ )
+
+(df.writeStream
+  .format("delta")
+  .option("checkpointLocation", f"{CHECKPOINT_BASE}/ex2")
+  .trigger(availableNow=True)
+  .toTable(f"{CATALOG}.{SCHEMA}.ex2_output")
+  .awaitTermination()
+  )
+ 
+
 
 
 # COMMAND ----------
@@ -145,6 +180,7 @@ assert result.filter("order_id = 'ORD-304'").select("amount").collect()[0][0] ==
 print("Exercise 2 passed!")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Exercise 3: Schema Evolution Handling
 # MAGIC **Difficulty**: Medium | **Time**: ~15 min
@@ -180,8 +216,44 @@ print("Exercise 2 passed!")
 
 # EXERCISE_KEY: auto_loader_ex3
 # TODO: Configure Auto Loader with schema evolution to handle new columns
-
 # Your code here
+
+df1 = (
+    spark.readStream
+      .format("cloudFiles")
+      .option("cloudFiles.format","json")
+      .option("cloudFiles.schemaLocation", f"{CHECKPOINT_BASE}/ex3_batch1/")
+      .load(f"{VOLUME_BASE}/ex3_files_batch1/")
+      )
+
+(df1.writeStream
+ .format("delta")
+ .option("checkpointLocation", f"{CHECKPOINT_BASE}/ex3_batch1")
+ .trigger(availableNow=True)
+ .toTable(f"{CATALOG}.{SCHEMA}.ex3_output")
+ .awaitTermination()
+ )      
+
+
+
+df2 =(
+    spark.readStream
+    .format("cloudFiles")
+    .option("cloudFiles.format", "json")
+    .option("cloudFiles.schemaLocation", f"{CHECKPOINT_BASE}/ex3_batch2/")
+    .option("cloudFiles.schemaEvolutionMode", "addNewColumns")
+    .load(f"{VOLUME_BASE}/ex3_files_batch2")
+)
+
+(df2.writeStream
+ .format("delta")
+ .option("checkpointLocation", f"{CHECKPOINT_BASE}/ex3_batch2")
+ .option("mergeSchema", "true")
+ .trigger(availableNow=True)
+ .toTable(f"{CATALOG}.{SCHEMA}.ex3_output")
+ .awaitTermination()
+ )
+
 
 
 # COMMAND ----------
@@ -203,6 +275,7 @@ assert result.filter("order_id = 'ORD-405'").select("priority").collect()[0][0] 
 print("Exercise 3 passed!")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Exercise 4: Rescued Data Column
 # MAGIC **Difficulty**: Medium | **Time**: ~10 min
@@ -234,8 +307,23 @@ print("Exercise 3 passed!")
 
 # EXERCISE_KEY: auto_loader_ex4
 # TODO: Read JSON with rescued data column enabled
-
 # Your code here
+df = (spark.readStream
+      .format("cloudFiles")
+      .option("cloudFiles.format", "json")
+      .option("cloudFiles.schemaLocation", f"{CHECKPOINT_BASE}/ex4/")
+      .option("rescuedDataColumn", "_rescued_data")
+      .schema("order_id STRING, customer_id STRING, amount DOUBLE, status STRING")
+      .load(f"{VOLUME_BASE}/ex4_files/")
+      )
+(df.writeStream
+ .format("delta")
+ .option("checkpointLocation", f"{CHECKPOINT_BASE}/ex4")
+ .trigger(availableNow=True)
+ .toTable(f"{CATALOG}.{SCHEMA}.ex4_output")
+ .awaitTermination()
+ )
+
 
 
 # COMMAND ----------
@@ -258,6 +346,7 @@ assert rescued_505 is not None, "ORD-505 should have rescued data (amount was 'I
 print("Exercise 4 passed!")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Exercise 5: Auto Loader with CSV Format and Custom Options
 # MAGIC **Difficulty**: Medium | **Time**: ~10 min
@@ -294,6 +383,27 @@ print("Exercise 4 passed!")
 
 # Your code here
 
+df1 = (spark.readStream
+      .format("cloudFiles")
+      .option("cloudFiles.format", "csv")
+      .option("delimiter", "|")
+      .option("header", "true")
+      .option("cloudFiles.schemaLocation", f"{CHECKPOINT_BASE}/ex5/")
+      .option("cloudFiles.schemaHints", "amount DOUBLE")
+      .load(f"{VOLUME_BASE}/ex5_files/")
+      )
+
+(df1.writeStream
+ .format("delta")
+ .option("checkpointLocation", f"{CHECKPOINT_BASE}/ex5/")
+ .trigger(availableNow=True)
+ .toTable(f"{CATALOG}.{SCHEMA}.ex5_output")
+ .awaitTermination()
+
+ )
+
+
+
 
 # COMMAND ----------
 
@@ -314,6 +424,7 @@ assert float(amt_554) == 330.00, f"ORD-554 amount should be 330.00, got {amt_554
 print("Exercise 5 passed!")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Exercise 6: Auto Loader + MERGE for Incremental Dedup Upsert
 # MAGIC **Difficulty**: Hard | **Time**: ~20 min
@@ -356,9 +467,41 @@ print("Exercise 5 passed!")
 
 # EXERCISE_KEY: auto_loader_ex6
 # TODO: Auto Loader read + foreachBatch MERGE into target table
-
 # Your code here
+from delta.tables import DeltaTable
 
+def upsert_micro_batch(micro_batch_df, batch_id):
+    deduplicated_df = micro_batch_df.dropDuplicates(["order_id"])
+
+    target_table = DeltaTable.forName(micro_batch_df.sparkSession, f"{CATALOG}.{SCHEMA}.ex6_target")
+
+    (
+        target_table.alias("target")
+        .merge(
+            deduplicated_df.alias("source"),
+            "target.order_id = source.order_id"  
+        )
+        .whenMatchedUpdateAll()
+        .whenNotMatchedInsertAll()
+        .execute()
+        )
+
+    
+
+df = (spark.readStream
+      .format("cloudFiles")
+      .option("cloudFiles.format", "json")
+      .option("cloudFiles.schemaLocation", f"{CHECKPOINT_BASE}/ex6")
+      .load(f"{VOLUME_BASE}/ex6_files")   
+)
+
+(df.writeStream
+ .foreachBatch(upsert_micro_batch)
+ .option("checkpointLocation", f"{CHECKPOINT_BASE}/ex6")
+ .trigger(availableNow=True)
+ .start()
+ .awaitTermination()
+ )
 
 # COMMAND ----------
 
