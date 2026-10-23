@@ -5,14 +5,9 @@
 
 class Solution:
     def removeElement(self, nums: list[int], val: int) -> int:
-        removes = 0
-        temp = 0
-        while val in nums:
-            nums.remove(val)
-            removes += 1
-        while removes > 0:
-            nums.append('_')
-            removes -= 1
-            temp += 1
-
-        return len(nums)-temp
+        k = 0
+        for i in range(len(nums)):
+            if nums[i] != val:
+                nums[k] = nums[i]
+                k += 1
+        return k
