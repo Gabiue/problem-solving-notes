@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # MAGIC %md
 # MAGIC # Batch Data Ingestion & File Formats
 # MAGIC **Zone**: ELT | **Exercises**: 6 | **Time**: ~60 min total
@@ -83,6 +87,20 @@ VOLUME_PATH = f"/Volumes/{CATALOG}/{SCHEMA}/source_files"
 # TODO: Read pipe-delimited CSV files from the Volume and write to Delta
 # Your code here
 
+df = (spark.read
+      .format('csv')
+      .option('header', 'true')
+      .option('delimiter', '|')
+      .option('inferschema', 'true')
+      .load(f"{VOLUME_PATH}/ex1_csv/")
+      )
+
+(df.write
+ .format('delta')
+ .mode('overwrite')
+ .saveAsTable(F"{CATALOG}.{SCHEMA}.ex1_output")
+ )      
+
 # COMMAND ----------
 
 result_ex1 = spark.table(f"{CATALOG}.{SCHEMA}.ex1_output")
@@ -140,6 +158,21 @@ print("Exercise 1 passed!")
 # EXERCISE_KEY: batch_ex2
 # TODO: Define a StructType schema and read JSON with it, then write to Delta
 # Your code here
+from pyspark.sql.types import StructType, StructField, StringType, DoubleType
+
+schema_ex2 = StructType([
+      StructField("order_id", StringType(), True),
+      StructField("customer_name", StringType(), True),
+      StructField("product", StringType(), True),
+      StructField("amount", DoubleType(), True),
+      StructField("order_date", StringType(), True)
+])
+
+df = spark.read.schema(schema_ex2).json(f"{VOLUME_PATH}/ex2_json/")
+
+df.write.mode("overwrite").option('overwriteSchema', 'true').saveAsTable(f"{CATALOG}.{SCHEMA}.ex2_output")
+      
+      
 
 # COMMAND ----------
 
@@ -202,6 +235,16 @@ print("Exercise 2 passed!")
 # TODO: Use COPY INTO to load CSV files into the existing Delta table
 # Your code here
 
+spark.sql(f"""
+          COPY INTO {CATALOG}.{SCHEMA}.ex3_transactions
+          FROM '{VOLUME_PATH}/ex3_csv/'
+          FILEFORMAT = CSV
+          FORMAT_OPTIONS(
+              'header' = 'true',
+              'inferSchema' = 'true'
+          )
+          """)
+
 # COMMAND ----------
 
 result_ex3 = spark.table(f"{CATALOG}.{SCHEMA}.ex3_transactions")
@@ -259,6 +302,25 @@ print("Exercise 3 passed!")
 # EXERCISE_KEY: batch_ex4
 # TODO: Read nested JSON, flatten all structs, and write flat Delta table
 # Your code here
+
+from pyspark.sql.functions import col
+
+df = spark.read.json(f"{VOLUME_PATH}/ex4_json/")
+
+df_flat = df.select(
+    col("event_id"),
+    col("event_type"),
+    col("timestamp"),
+    col("amount"),
+    col("user.user_id").alias("user_id"),
+    col("user.name").alias("user_name"),
+    col("user.email").alias("user_email"),
+    col("user.location.city").alias("city"),
+    col("user.location.state").alias("state"),
+)
+
+df_flat.write.mode("overwrite").saveAsTable(f"{CATALOG}.{SCHEMA}.ex4_output")
+
 
 # COMMAND ----------
 
@@ -326,8 +388,30 @@ print("Exercise 4 passed!")
 # COMMAND ----------
 
 # EXERCISE_KEY: batch_ex5
-# TODO: Read CSV with explicit schema, use permissive mode, filter out malformed records
+# TODO: Read CSV with exp
+# licit schema, use permissive mode, filter out malformed records
 # Your code here
+
+from pyspark.sql.types import StructType, StructField, StringType, DoubleType, TimestampType
+
+schema_ex5 = StructType([
+    StructField("sensor_id", StringType(), True),
+    StructField("reading", DoubleType(), True),
+    StructField("unit", StringType(), True),
+    StructField("record_at", TimestampType(), True),
+    StructField("_corrupt_record", StringType(), True),
+])
+
+df = (spark.read
+      .option('header', 'true')
+      .option('mode', 'PERMISSIVE')
+      .option('columnNameOfCorruptedRecord', '_corrupt_record')
+      .schema(schema_ex5)
+      .csv(f"{VOLUME_PATH}/ex5_csv/")
+      )
+
+df_clean = df.filter("_corrupt_record IS NULL").drop("_corrupt_record")
+df_clean.write.mode('overwrite').saveAsTable(f"{CATALOG}.{SCHEMA}.ex5_output")
 
 # COMMAND ----------
 
@@ -406,6 +490,48 @@ print("Exercise 5 passed!")
 # EXERCISE_KEY: batch_ex6
 # TODO: Read 3 formats, rename columns to unified schema, union, and write to Delta
 # Your code here
+
+from pyspark.sql.functions import col
+
+df_a = (spark.read
+        .option('header', 'true')
+        .option('inferSchema', 'true')
+        .csv(f"{VOLUME_PATH}/ex6_csv/")
+        .select(
+            col('employee_id'),
+            col("full_name").alias("name"),
+            col("department"),
+            col("salary").cast('int').alias('salary'),
+            col("hire_date").cast("date").alias("hire_date"),
+        )
+        )
+
+df_b = (spark.read
+        .json(f"{VOLUME_PATH}/ex6_json/")
+        .select(
+            col("emp_id").alias('employee_id'),
+            col('name'),
+            col('dept').alias('department'),
+            col('annual_salary').cast('int').alias('salary'),
+            col('start_date').cast('date').alias('hire_date'),
+        )
+        )
+
+df_c = (spark.read
+        .parquet(f"{VOLUME_PATH}/ex6_parquet/")
+        .select(
+            col('id').alias('employee_id'),
+            col('employee_name').alias('name'),
+            col('department_name').alias('department'),
+            col('compensation').cast('int').alias('salary'),
+            col('date_hired').cast("date").alias('hire_date')
+        )
+        )
+
+df_all = df_a.unionByName(df_b).unionByName(df_c)
+
+df_all.write.mode('overwrite').saveAsTable(f"{CATALOG}.{SCHEMA}.ex6_output")
+
 
 # COMMAND ----------
 
