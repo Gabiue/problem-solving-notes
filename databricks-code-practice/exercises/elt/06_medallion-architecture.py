@@ -1,5 +1,8 @@
 # Databricks notebook source
-# COMMAND ----------
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # MAGIC %md
 # MAGIC # Medallion Architecture
 # MAGIC **Topic**: ELT | **Exercises**: 8 | **Total Time**: ~90 min
@@ -44,6 +47,7 @@
 # MAGIC %run ./setup/medallion-architecture-setup
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC **Setup complete.** All source and output tables are in `db_code.medallion_architecture`.
 # MAGIC Each exercise has its own independent source tables and writes to its own output table.
@@ -54,6 +58,7 @@
 # MAGIC - Ex 8 (hard): Cross-tier data quality report
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Exercise 1: Raw Append to Bronze Preserving All Fields
 # MAGIC **Difficulty**: Easy | **Time**: ~5 min
@@ -80,6 +85,11 @@
 
 # EXERCISE_KEY: medallion_ex1
 # TODO: Create bronze table from raw orders preserving all rows and all columns
+spark.sql(f""" 
+          CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.bronze_orders_ex1 AS
+          SELECT order_id, customer_id, product_id, amount, status, order_date, updated_at
+          FROM {CATALOG}.{SCHEMA}.raw_orders_ex1
+          """)
 
 # Your code here
 
@@ -107,6 +117,7 @@ assert zero_amt == 1, "ORD-009 with $0 amount must be preserved in bronze"
 print("Exercise 1 passed!")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Exercise 2: Bronze with Ingestion Metadata Columns
 # MAGIC **Difficulty**: Easy | **Time**: ~5 min
@@ -135,7 +146,13 @@ print("Exercise 1 passed!")
 
 # EXERCISE_KEY: medallion_ex2
 # TODO: Create bronze table from raw orders with _ingested_at and _source_file metadata
-
+spark.sql(f"""
+          CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.bronze_orders_ex2 AS
+          SELECT * ,
+          current_timestamp() AS _ingested_at,
+          'raw_orders_batch_001' AS _source_file
+          FROM {CATALOG}.{SCHEMA}.raw_orders_ex2
+          """)
 # Your code here
 
 
@@ -166,6 +183,7 @@ assert null_ts == 0, f"Found {null_ts} rows with NULL _ingested_at"
 print("Exercise 2 passed!")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Exercise 3: Bronze-to-Silver Dedup Using ROW_NUMBER
 # MAGIC **Difficulty**: Medium | **Time**: ~10 min
@@ -196,9 +214,14 @@ print("Exercise 2 passed!")
 
 # COMMAND ----------
 
-# EXERCISE_KEY: medallion_ex3
+# EXERCISE_KEY: medallion_ex3sss
 # TODO: Dedup bronze orders keeping latest _ingested_at per order_id
-
+spark.sql( f"""
+            CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.silver_orders_ex3
+            SELECT order_id, customer_id, product_id, amount, status, order_date
+            FROM db_code.medallion_architecture.bronze_orders_ex3
+            QUALIFY ROW_NUMBER() OVER(PARTITION BY order_id ORDER BY _ingested_at DESC) = 1
+            """)
 # Your code here
 
 
@@ -226,6 +249,7 @@ assert null_cust == 2, f"Expected 2 rows with NULL customer_id (ORD-304, ORD-310
 print("Exercise 3 passed!")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Exercise 4: Silver Data Cleaning - Nulls, Types, Standardization
 # MAGIC **Difficulty**: Medium | **Time**: ~10 min
@@ -263,7 +287,16 @@ print("Exercise 3 passed!")
 
 # EXERCISE_KEY: medallion_ex4
 # TODO: Clean bronze data - filter nulls, cast types, standardize status
+spark.sql(f"""
+          CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.silver_orders_ex4
+          SELECT order_id, customer_id, product_id,
+          CAST(amount AS DOUBLE) AS amount,
+          UPPER(TRIM(status)) AS status,
+          CAST(order_date AS DATE) as order_date
+          FROM db_code.medallion_architecture.bronze_orders_ex4
+          WHERE order_id IS NOT NULL AND customer_id IS NOT NULL
 
+          """)
 # Your code here
 
 
@@ -300,6 +333,7 @@ assert ord402[0].amount == 142.50, f"ORD-402 amount should be 142.50, got {ord40
 print("Exercise 4 passed!")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Exercise 5: Silver-to-Gold Aggregation - Daily/Regional Summaries
 # MAGIC **Difficulty**: Medium | **Time**: ~10 min
@@ -366,6 +400,7 @@ assert abs(eu_west_22[0].total_revenue - 275.00) < 0.01, \
 print("Exercise 5 passed!")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Exercise 6: Incremental Bronze-to-Silver with MERGE
 # MAGIC **Difficulty**: Hard | **Time**: ~20 min
@@ -440,6 +475,7 @@ for eid in ["ORD-608", "ORD-609"]:
 print("Exercise 6 passed!")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Exercise 7: Gold Incremental Refresh with MERGE
 # MAGIC **Difficulty**: Hard | **Time**: ~15 min
@@ -520,6 +556,7 @@ assert len(us_west_22) == 1, "Should have 1 row for US-West on 2026-03-22 (new i
 print("Exercise 7 passed!")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Exercise 8: Data Quality Report Across Tiers
 # MAGIC **Difficulty**: Hard | **Time**: ~15 min
