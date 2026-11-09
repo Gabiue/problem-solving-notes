@@ -366,6 +366,18 @@ print("Exercise 4 passed!")
 
 # Your code here
 
+spark.sql(f"""
+          CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.gold_daily_summary_ex5
+          SELECT
+            order_date,
+            region,
+            COUNT(*) as order_count,
+            SUM(amount) as total_revenue,
+            ROUND(AVG(amount), 2) as avg_order_amount
+            FROM {CATALOG}.{SCHEMA}.silver_orders_ex5
+            GROUP BY order_date, region
+          """)
+
 
 # COMMAND ----------
 
@@ -440,6 +452,31 @@ print("Exercise 5 passed!")
 
 # Your code here
 
+spark.sql(f"""
+          CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.silver_orders_ex6_merged as
+          SELECT * FROM {CATALOG}.{SCHEMA}.silver_orders_ex6
+          """)
+
+spark.sql(f"""
+          MERGE INTO {CATALOG}.{SCHEMA}.silver_orders_ex6_merged AS target
+          USING(
+              SELECT order_id, customer_id, amount, status, updated_at
+              FROM {CATALOG}.{SCHEMA}.bronze_batch_ex6
+              QUALIFY ROW_NUMBER() OVER (PARTITION BY order_id ORDER BY _ingested_at DESC) = 1
+          ) AS source
+          ON target.order_id = source.order_id
+          WHEN MATCHED AND source.updated_at > target.updated_at THEN
+          UPDATE SET
+            target.customer_id = source.customer_id,
+            target.amount = source.amount,
+            target.status = source.status,
+            target.updated_at = source.updated_at,
+            target.processed_at = current_timestamp()
+          WHEN NOT MATCHED THEN
+          INSERT (order_id, customer_id, amount, status, updated_at, processed_at)
+          VALUES (source.order_id, source.customer_id, source.amount, source.status, source.updated_at, current_timestamp())
+
+          """)          
 
 # COMMAND ----------
 
@@ -514,6 +551,36 @@ print("Exercise 6 passed!")
 
 # Your code here
 
+target = f"{CATALOG}.{SCHEMA}.gold_summary_ex7_merged"
+
+spark.sql(f"""
+          CREATE OR REPLACE TABLE {target} AS
+          SELECT * FROM {CATALOG}.{SCHEMA}.gold_summary_ex7
+          """)
+
+spark.sql(f"""
+          MERGE INTO {target} AS t
+          USING(
+            SELECT
+                order_date,
+                region,
+                CAST(COUNT(*) AS INT) as order_count,
+                SUM(amount) as total_revenue,
+                ROUND(AVG(amount), 2) as avg_order_amount
+            FROM {CATALOG}.{SCHEMA}.silver_new_ex7
+            GROUP BY order_date, region
+          )AS s
+          ON t.order_date = s.order_date and t.region = s.region
+          WHEN MATCHED THEN
+          UPDATE SET
+            t.order_count = s.order_count,
+            t.total_revenue = s.total_revenue,
+            t.avg_order_amount = s.avg_order_amount
+        
+        WHEN NOT MATCHED THEN
+        INSERT (order_date,region, order_count, total_revenue, avg_order_amount)
+        VALUES (s.order_date, s.region, s.order_count, s.total_revenue, s.avg_order_amount)
+          """)
 
 # COMMAND ----------
 
@@ -611,6 +678,47 @@ print("Exercise 7 passed!")
 # TODO: Run quality checks across bronze, silver, gold tiers and write report
 
 # Your code here
+
+t = f"{CATALOG}.{SCHEMA}"
+
+spark.sql(f"""
+    CREATE OR REPLACE TABLE {t}.quality_report_ex8 AS
+    WITH checks AS (
+        SELECT 'bronze' AS tier, 'null_order_id' AS check_name,
+               COUNT(*) AS total_rows, COUNT_IF(order_id IS NULL) AS failed_rows
+        FROM {t}.qc_bronze_ex8
+        UNION ALL
+        SELECT 'bronze', 'invalid_date_range',
+               COUNT(*), COUNT_IF(order_date < DATE'2026-01-01' OR order_date > DATE'2027-12-31')
+        FROM {t}.qc_bronze_ex8
+        UNION ALL
+        SELECT 'bronze', 'negative_amount',
+               COUNT(*), COUNT_IF(amount < 0)
+        FROM {t}.qc_bronze_ex8
+        UNION ALL
+        SELECT 'silver', 'orphan_customer_id',
+               COUNT(*),
+               (SELECT COUNT(*) FROM {t}.qc_silver_ex8 s
+                LEFT ANTI JOIN {t}.qc_customers_ex8 c ON s.customer_id = c.customer_id)
+        FROM {t}.qc_silver_ex8
+        UNION ALL
+        SELECT 'gold', 'zero_order_count',
+               COUNT(*), COUNT_IF(order_count = 0)
+        FROM {t}.qc_gold_ex8
+        UNION ALL
+        SELECT 'gold', 'negative_revenue',
+               COUNT(*), COUNT_IF(total_revenue < 0)
+        FROM {t}.qc_gold_ex8
+    )
+    SELECT
+        tier,
+        check_name,
+        CAST(total_rows AS INT) AS total_rows,
+        CAST(failed_rows AS INT) AS failed_rows,
+        CAST(total_rows - failed_rows AS DOUBLE) / total_rows AS pass_rate
+    FROM checks
+""")
+
 
 
 # COMMAND ----------
